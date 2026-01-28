@@ -1,0 +1,538 @@
+import React, { useState, useEffect } from 'react';
+import { Play, Check, Clock, AlertTriangle, Star, RefreshCw, Trophy, ArrowUp, ArrowDown, Gamepad2, Zap, Sword, Shield, Ghost, Crosshair, ChevronRight } from 'lucide-react';
+
+// --- Data & Constants ---
+
+const INITIAL_TASKS = [
+  { id: 1, content: "明天數學測驗溫習", urgent: true, important: true, quadrant: "do-first", type: "boss" },
+  { id: 2, content: "回覆朋友的閒聊訊息", urgent: true, important: false, quadrant: "delegate", type: "npc" },
+  { id: 3, content: "兩星期後的歷史專題報告", urgent: false, important: true, quadrant: "schedule", type: "quest" },
+  { id: 4, content: "玩手機遊戲 (無特定目標)", urgent: false, important: false, quadrant: "delete", type: "mob" },
+  { id: 5, content: "幫媽媽洗碗 (家務)", urgent: true, important: false, quadrant: "delegate", type: "npc" },
+  { id: 6, content: "整理混亂的書包", urgent: false, important: true, quadrant: "schedule", type: "item" },
+  { id: 7, content: "觀看網上熱門影片", urgent: false, important: false, quadrant: "delete", type: "mob" },
+  { id: 8, content: "出席籃球校隊訓練", urgent: true, important: true, quadrant: "do-first", type: "quest" },
+  { id: 9, content: "報名參加暑期交流團 (明天截止)", urgent: true, important: true, quadrant: "do-first", type: "event" },
+  { id: 10, content: "閱讀感興趣的課外書", urgent: false, important: true, quadrant: "schedule", type: "item" }
+];
+
+const QUADRANTS = {
+  "do-first": { 
+    title: "Critical / 重點擊殺", 
+    subtitle: "緊急 & 重要",
+    color: "bg-red-900/40 border-red-500 text-red-100 shadow-[0_0_15px_rgba(239,68,68,0.3)]", 
+    icon: <Sword size={20} className="text-red-400" />,
+    desc: "立即執行 (Do First)" 
+  },
+  "schedule": { 
+    title: "Strategy / 戰略部署", 
+    subtitle: "重要 但 不緊急",
+    color: "bg-blue-900/40 border-blue-500 text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.3)]", 
+    icon: <Shield size={20} className="text-blue-400" />,
+    desc: "規劃時間 (Schedule)" 
+  },
+  "delegate": { 
+    title: "Side Quest / 速戰速決", 
+    subtitle: "緊急 但 不重要",
+    color: "bg-yellow-900/40 border-yellow-500 text-yellow-100 shadow-[0_0_15px_rgba(234,179,8,0.3)]", 
+    icon: <Zap size={20} className="text-yellow-400" />,
+    desc: "授權/快速處理 (Delegate)" 
+  },
+  "delete":   { 
+    title: "Trash / 略過", 
+    subtitle: "不緊急 & 不重要",
+    color: "bg-gray-800/60 border-gray-600 text-gray-300", 
+    icon: <Ghost size={20} className="text-gray-400" />,
+    desc: "不做/少做 (Delete)" 
+  }
+};
+
+// --- Components ---
+
+const GameButton = ({ onClick, children, className = "", disabled = false, variant = "primary" }) => {
+  const baseStyle = "relative px-6 py-3 font-bold font-mono tracking-wider transition-all transform active:translate-y-1 active:shadow-none flex items-center justify-center gap-2 border-b-4 rounded-lg touch-manipulation";
+  
+  const variants = {
+    primary: "bg-cyan-600 border-cyan-800 text-white hover:bg-cyan-500 hover:border-cyan-700 shadow-[0_4px_0_rgb(21,94,117)] disabled:bg-cyan-900 disabled:border-cyan-950 disabled:text-cyan-400 disabled:shadow-none",
+    secondary: "bg-slate-700 border-slate-900 text-slate-200 hover:bg-slate-600 hover:border-slate-800 shadow-[0_4px_0_rgb(15,23,42)]",
+    success: "bg-green-600 border-green-800 text-white hover:bg-green-500 hover:border-green-700 shadow-[0_4px_0_rgb(22,101,52)]",
+    danger: "bg-rose-600 border-rose-800 text-white hover:bg-rose-500 hover:border-rose-700 shadow-[0_4px_0_rgb(159,18,57)]"
+  };
+  
+  return (
+    <button 
+      onClick={onClick} 
+      disabled={disabled}
+      className={`${baseStyle} ${variants[variant]} ${className}`}
+    >
+      {children}
+    </button>
+  );
+};
+
+const StatBadge = ({ type, active }) => {
+  if (type === 'urgent') {
+    return active 
+      ? <span className="flex items-center gap-1 text-[10px] md:text-xs bg-red-500/20 text-red-300 border border-red-500/50 px-1.5 py-0.5 rounded font-mono"><Zap size={10} /> URGENT</span>
+      : <span className="flex items-center gap-1 text-[10px] md:text-xs bg-slate-800 text-slate-500 border border-slate-700 px-1.5 py-0.5 rounded font-mono">NON-URGENT</span>;
+  }
+  if (type === 'important') {
+    return active 
+      ? <span className="flex items-center gap-1 text-[10px] md:text-xs bg-yellow-500/20 text-yellow-300 border border-yellow-500/50 px-1.5 py-0.5 rounded font-mono"><Star size={10} /> IMPORTANT</span>
+      : <span className="flex items-center gap-1 text-[10px] md:text-xs bg-slate-800 text-slate-500 border border-slate-700 px-1.5 py-0.5 rounded font-mono">TRIVIAL</span>;
+  }
+  return null;
+};
+
+// --- Main App Component ---
+
+export default function TimeManagementGame() {
+  const [level, setLevel] = useState(0); 
+  const [tasks, setTasks] = useState([...INITIAL_TASKS]);
+  const [showFeedback, setShowFeedback] = useState(null); 
+
+  // Level 2 State
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
+  const [l2Selection, setL2Selection] = useState({ urgent: null, important: null });
+
+  // Level 3 State
+  const [matrixTasks, setMatrixTasks] = useState([]); 
+  const [poolTasks, setPoolTasks] = useState([]); 
+  const [selectedTask, setSelectedTask] = useState(null);
+
+  useEffect(() => {
+    if (level === 1) {
+      setTasks([...INITIAL_TASKS].sort(() => Math.random() - 0.5));
+    }
+    if (level === 3) {
+      setPoolTasks([...INITIAL_TASKS].sort(() => Math.random() - 0.5));
+      setMatrixTasks([]);
+    }
+  }, [level]);
+
+  // --- Logic ---
+  const moveTask = (index, direction) => {
+    const newTasks = [...tasks];
+    if (direction === 'up' && index > 0) {
+      [newTasks[index], newTasks[index - 1]] = [newTasks[index - 1], newTasks[index]];
+    } else if (direction === 'down' && index < newTasks.length - 1) {
+      [newTasks[index], newTasks[index + 1]] = [newTasks[index + 1], newTasks[index]];
+    }
+    setTasks(newTasks);
+  };
+
+  const checkLevel1 = () => {
+    showToast('success', "Quest List Updated! 任務清單更新完畢！");
+    setTimeout(() => setLevel(2), 1500);
+  };
+
+  const handleL2Submit = () => {
+    const task = tasks[currentTaskIndex];
+    const isUrgentCorrect = l2Selection.urgent === task.urgent;
+    const isImportantCorrect = l2Selection.important === task.important;
+
+    if (isUrgentCorrect && isImportantCorrect) {
+      showToast('success', "Stats Analyzed! 屬性分析正確！");
+      setTimeout(() => {
+        setL2Selection({ urgent: null, important: null });
+        if (currentTaskIndex < tasks.length - 1) {
+          setCurrentTaskIndex(prev => prev + 1);
+        } else {
+          setLevel(3);
+        }
+      }, 800);
+    } else {
+      showToast('error', "Analysis Failed! 再仔細看看任務屬性！");
+    }
+  };
+
+  const handleQuadrantClick = (quadrantKey) => {
+    if (!selectedTask) return;
+
+    if (selectedTask.quadrant === quadrantKey) {
+      setMatrixTasks([...matrixTasks, { ...selectedTask, placedQuadrant: quadrantKey }]);
+      setPoolTasks(poolTasks.filter(t => t.id !== selectedTask.id));
+      setSelectedTask(null);
+      
+      // 邏輯修改：當最後一個任務也放好後，只提示完成，不自動跳轉
+      if (poolTasks.length === 1) {
+        showToast('success', "Deployment Complete! 部署完成，準備確認！");
+      }
+    } else {
+      showToast('error', "Invalid Deployment! 位置錯誤，請重新部署！");
+    }
+  };
+
+  // 新增：手動提交 Level 3
+  const handleLevel3Submit = () => {
+    setLevel(4);
+  };
+
+  const showToast = (type, message) => {
+    setShowFeedback({ type, message });
+    setTimeout(() => setShowFeedback(null), 3000);
+  };
+
+  // --- Renders ---
+
+  const renderIntro = () => (
+    <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 animate-in fade-in zoom-in duration-500 overflow-y-auto">
+      <div className="relative flex-shrink-0">
+        <div className="absolute inset-0 bg-cyan-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
+        <Gamepad2 size={80} className="text-cyan-400 relative z-10" />
+      </div>
+      <div>
+        <h1 className="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 mb-4 font-mono tracking-tighter" style={{ textShadow: '0 0 20px rgba(34,211,238,0.3)' }}>
+          TIME MASTER
+        </h1>
+        <p className="text-xl text-cyan-100/80 max-w-md mx-auto font-mono border border-cyan-900/50 bg-slate-800/50 p-4 rounded-lg">
+          &gt; System Initialized...<br/>
+          &gt; New Objectives Detected.<br/>
+          <span className="text-cyan-400 mt-2 block">成為時間管理大師，攻略你的人生！</span>
+        </p>
+      </div>
+      <GameButton onClick={() => setLevel(1)} className="text-xl px-12 py-4 animate-bounce">
+        START GAME <Play size={20} fill="currentColor" />
+      </GameButton>
+    </div>
+  );
+
+  const renderLevel1 = () => (
+    <div className="max-w-2xl mx-auto w-full p-4 h-full flex flex-col font-mono">
+      <div className="mb-4 border-b-2 border-slate-700 pb-4 flex-shrink-0">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-2xl font-bold text-cyan-400 flex items-center gap-2">
+            <span className="bg-cyan-900 text-cyan-400 text-xs px-2 py-1 rounded border border-cyan-700">STAGE 1</span>
+            Quest Priorities
+          </h2>
+          <span className="text-slate-400 text-sm">Drag to reorder</span>
+        </div>
+        <p className="text-slate-400 text-sm">
+          將你認為 <span className="text-red-400 font-bold">最優先 (HP危險)</span> 的任務排到最上方。
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-cyan-900 scrollbar-track-slate-900">
+        {tasks.map((task, index) => (
+          <div key={task.id} className="group bg-slate-800 p-3 rounded-sm border-l-4 border-slate-600 hover:border-cyan-500 hover:bg-slate-750 transition-all flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-4">
+              <span className={`font-bold font-mono text-xl w-8 h-8 flex items-center justify-center rounded bg-slate-900 border border-slate-700 flex-shrink-0 ${index < 3 ? 'text-red-400 border-red-900/50' : 'text-slate-500'}`}>
+                {index + 1}
+              </span>
+              <span className="text-lg font-medium text-slate-200">{task.content}</span>
+            </div>
+            <div className="flex flex-col gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+              <button 
+                onClick={() => moveTask(index, 'up')} 
+                disabled={index === 0}
+                className="p-1 hover:bg-cyan-900/50 rounded text-cyan-400 disabled:opacity-20 touch-manipulation"
+              >
+                <ArrowUp size={24} />
+              </button>
+              <button 
+                onClick={() => moveTask(index, 'down')} 
+                disabled={index === tasks.length - 1}
+                className="p-1 hover:bg-cyan-900/50 rounded text-cyan-400 disabled:opacity-20 touch-manipulation"
+              >
+                <ArrowDown size={24} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Changed from fixed positioning to flex layout to prevent overlap on iPad */}
+      <div className="mt-auto pt-4 pb-2 flex-shrink-0 flex justify-center w-full z-10 bg-slate-900/90 backdrop-blur-sm">
+        <GameButton onClick={checkLevel1} className="w-full max-w-md shadow-[0_0_20px_rgba(6,182,212,0.5)]">
+          CONFIRM ORDER <Check size={20} />
+        </GameButton>
+      </div>
+    </div>
+  );
+
+  const renderLevel2 = () => {
+    const task = tasks[currentTaskIndex];
+    return (
+      // Added overflow-y-auto and min-h-full to ensure scrollability on landscape tablets
+      <div className="h-full overflow-y-auto w-full">
+        <div className="max-w-xl mx-auto w-full p-4 min-h-full flex flex-col justify-center font-mono py-12">
+          <div className="mb-6 flex-shrink-0">
+            <div className="flex justify-between text-cyan-400 mb-2 font-bold text-sm">
+              <span>ANALYZING...</span>
+              <span>{currentTaskIndex + 1} / {tasks.length}</span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-none h-4 border border-slate-700 p-0.5">
+              <div className="bg-gradient-to-r from-cyan-600 to-blue-500 h-full transition-all duration-300 shadow-[0_0_10px_rgba(6,182,212,0.5)]" style={{ width: `${(currentTaskIndex / tasks.length) * 100}%` }}></div>
+            </div>
+          </div>
+
+          <div className="bg-slate-800 rounded-lg shadow-2xl border border-slate-600 p-6 md:p-8 text-center mb-8 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-50"></div>
+            
+            <div className="inline-block p-4 rounded-full bg-slate-900 mb-6 border border-slate-700">
+              <Crosshair size={40} className="text-cyan-400 animate-spin-slow" />
+            </div>
+
+            <h3 className="text-xl md:text-2xl font-bold text-white mb-8 leading-relaxed tracking-wide min-h-[4rem] flex items-center justify-center">
+              {task.content}
+            </h3>
+            
+            <div className="grid grid-cols-1 gap-6">
+              {/* Urgency Toggle */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs text-cyan-500 font-bold uppercase tracking-widest border-b border-slate-700 pb-1 mb-1">Time Criticality (Urgency)</span>
+                <div className="flex gap-3 justify-center">
+                  <button 
+                    onClick={() => setL2Selection({...l2Selection, urgent: true})}
+                    className={`flex-1 py-4 px-2 md:px-4 rounded font-bold border-2 transition-all flex flex-col items-center gap-1 touch-manipulation ${l2Selection.urgent === true ? 'bg-red-900/50 text-red-100 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500'}`}
+                  >
+                    <Zap size={24} /> 
+                    <span className="text-sm">HIGH (緊急)</span>
+                  </button>
+                  <button 
+                    onClick={() => setL2Selection({...l2Selection, urgent: false})}
+                    className={`flex-1 py-4 px-2 md:px-4 rounded font-bold border-2 transition-all flex flex-col items-center gap-1 touch-manipulation ${l2Selection.urgent === false ? 'bg-green-900/50 text-green-100 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500'}`}
+                  >
+                    <Clock size={24} />
+                    <span className="text-sm">LOW (不急)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Importance Toggle */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs text-cyan-500 font-bold uppercase tracking-widest border-b border-slate-700 pb-1 mb-1">Impact Level (Importance)</span>
+                <div className="flex gap-3 justify-center">
+                  <button 
+                    onClick={() => setL2Selection({...l2Selection, important: true})}
+                    className={`flex-1 py-4 px-2 md:px-4 rounded font-bold border-2 transition-all flex flex-col items-center gap-1 touch-manipulation ${l2Selection.important === true ? 'bg-yellow-900/50 text-yellow-100 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.4)]' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500'}`}
+                  >
+                    <Star size={24} />
+                    <span className="text-sm">HIGH (重要)</span>
+                  </button>
+                  <button 
+                    onClick={() => setL2Selection({...l2Selection, important: false})}
+                    className={`flex-1 py-4 px-2 md:px-4 rounded font-bold border-2 transition-all flex flex-col items-center gap-1 touch-manipulation ${l2Selection.important === false ? 'bg-slate-700 text-slate-300 border-slate-500' : 'bg-slate-900 text-slate-500 border-slate-700 hover:border-slate-500'}`}
+                  >
+                    <Ghost size={24} />
+                    <span className="text-sm">LOW (不重)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <GameButton 
+            onClick={handleL2Submit} 
+            disabled={l2Selection.urgent === null || l2Selection.important === null}
+            className="w-full text-lg flex-shrink-0"
+          >
+            SUBMIT ANALYSIS
+          </GameButton>
+        </div>
+      </div>
+    );
+  };
+
+  const renderLevel3 = () => {
+    const isCompleted = poolTasks.length === 0;
+
+    return (
+      <div className="h-full flex flex-col p-2 md:p-4 max-w-5xl mx-auto font-mono w-full">
+        <div className="flex justify-between items-center mb-2 flex-shrink-0">
+          <h2 className="text-lg md:text-2xl font-bold text-cyan-400 flex items-center gap-2">
+            <span className="bg-cyan-900 text-cyan-400 text-xs px-2 py-1 rounded border border-cyan-700">STAGE 3</span>
+            Deploy Units
+          </h2>
+          <span className="text-xs md:text-sm text-slate-400">Target Protocol</span>
+        </div>
+
+        {/* The Matrix */}
+        {/* Added min-h-0 to ensure grid doesn't overflow flex container on iPad */}
+        <div className="grid grid-cols-2 grid-rows-2 gap-2 md:gap-4 flex-1 min-h-0 mb-4">
+          {Object.entries(QUADRANTS).map(([key, data]) => (
+            <div 
+              key={key}
+              onClick={() => handleQuadrantClick(key)}
+              className={`relative rounded-lg border-2 p-2 md:p-3 flex flex-col transition-all cursor-pointer overflow-hidden backdrop-blur-sm touch-manipulation
+                ${data.color} 
+                ${selectedTask ? 'hover:bg-opacity-80 hover:scale-[1.01] ring-2 ring-transparent hover:ring-cyan-400/50 cursor-crosshair' : 'cursor-default'}
+              `}
+            >
+              <div className="flex items-center gap-2 mb-2 border-b border-white/10 pb-2 flex-shrink-0">
+                <div className="p-1 rounded bg-black/20 flex-shrink-0">{data.icon}</div>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-bold text-xs md:text-sm uppercase tracking-wider truncate">{data.title}</span>
+                  <span className="text-[10px] md:text-xs opacity-80 truncate">{data.subtitle}</span>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-1 md:space-y-2 pr-1 custom-scrollbar">
+                {matrixTasks.filter(t => t.placedQuadrant === key).map(t => (
+                  <div key={t.id} className="bg-black/40 p-1.5 md:p-2 rounded text-xs md:text-sm shadow text-slate-200 border-l-2 border-cyan-500 animate-in zoom-in duration-300 whitespace-normal break-words">
+                    {t.content}
+                  </div>
+                ))}
+              </div>
+              
+              {selectedTask && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity backdrop-blur-[1px] z-10">
+                  <span className="bg-cyan-600 text-white px-3 py-1 rounded shadow-lg text-xs font-bold tracking-widest border border-cyan-400">DEPLOY HERE</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Task Pool OR Submit Button */}
+        {/* Increased height to h-40 md:h-48 to fit more text */}
+        <div className="h-40 md:h-48 bg-slate-800/80 rounded-lg p-2 md:p-3 border-t-2 border-slate-600 backdrop-blur-md flex-shrink-0 relative overflow-hidden transition-all duration-500">
+          
+          {isCompleted ? (
+            <div className="h-full w-full flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500">
+              <p className="text-cyan-400 font-bold mb-4 text-center">所有單位已部署。準備好後請提交。<br/>(All units ready for final inspection)</p>
+              <GameButton onClick={handleLevel3Submit} className="w-full max-w-md shadow-[0_0_20px_rgba(6,182,212,0.5)] animate-bounce">
+                CONFIRM DEPLOYMENT <Check size={20} />
+              </GameButton>
+            </div>
+          ) : (
+            <>
+              <div className="text-xs text-slate-400 mb-2 uppercase tracking-widest flex items-center gap-2">
+                <RefreshCw size={12} className={poolTasks.length > 0 ? "animate-spin-slow" : ""} /> 
+                Pending Deployment ({poolTasks.length})
+              </div>
+              
+              <div className="flex gap-3 overflow-x-auto pb-2 h-[calc(100%-1.5rem)] items-center custom-scrollbar">
+                  {poolTasks.map(task => (
+                    <button
+                      key={task.id}
+                      onClick={() => setSelectedTask(selectedTask?.id === task.id ? null : task)}
+                      className={`
+                        flex-shrink-0 w-56 md:w-64 p-3 rounded text-left relative transition-all duration-200 group h-full flex flex-col justify-between touch-manipulation
+                        ${selectedTask?.id === task.id 
+                          ? 'bg-cyan-900/80 border-2 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.4)] -translate-y-1' 
+                          : 'bg-slate-700 border border-slate-600 hover:border-slate-400 hover:bg-slate-600'}
+                      `}
+                    >
+                      <div className="flex justify-between items-start mb-1 flex-shrink-0">
+                        <span className="text-[10px] text-slate-400 font-mono">ID_0{task.id}</span>
+                        {selectedTask?.id === task.id && <div className="animate-pulse w-2 h-2 bg-cyan-400 rounded-full"></div>}
+                      </div>
+                      
+                      {/* Removed line-clamp-2, added flex-1 and overflow control */}
+                      <div className="text-sm font-medium text-slate-100 leading-tight flex-1 overflow-y-auto custom-scrollbar my-1 pr-1">
+                        {task.content}
+                      </div>
+
+                      {/* SHOWING SELECTED ATTRIBUTES FROM LEVEL 2 */}
+                      <div className="flex gap-1 mt-2 flex-shrink-0">
+                        <StatBadge type="urgent" active={task.urgent} />
+                        <StatBadge type="important" active={task.important} />
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderWin = () => (
+    <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-8 animate-in zoom-in duration-700 font-mono relative overflow-hidden overflow-y-auto">
+      {/* Confetti effect background using css circles */}
+      <div className="absolute top-10 left-10 w-4 h-4 bg-yellow-500 rounded-full animate-ping"></div>
+      <div className="absolute top-20 right-20 w-3 h-3 bg-cyan-500 rounded-full animate-ping delay-300"></div>
+      <div className="absolute bottom-20 left-1/3 w-6 h-6 bg-purple-500 rounded-full animate-ping delay-700"></div>
+
+      <div className="relative flex-shrink-0">
+        <div className="absolute inset-0 bg-yellow-500/20 blur-2xl rounded-full"></div>
+        <Trophy size={100} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]" />
+      </div>
+      
+      <div className="space-y-2 flex-shrink-0">
+        <h1 className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500">
+          MISSION COMPLETE
+        </h1>
+        <p className="text-cyan-400 tracking-[0.2em] text-sm">LEVEL CLEARED • RANK S</p>
+      </div>
+
+      <div className="bg-slate-800/80 p-6 rounded-xl border border-slate-600 max-w-lg shadow-xl backdrop-blur-sm flex-shrink-0">
+        <p className="text-lg text-slate-300 leading-relaxed">
+          你已掌握 <span className="text-cyan-400 font-bold">艾森豪矩陣 (Eisenhower Matrix)</span> 技能！
+          <br/><br/>
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-sm text-left mt-4">
+            <div className="bg-red-900/30 p-2 rounded border border-red-900/50 text-red-200">🔥 Boss級：優先擊殺 (Do First)</div>
+            <div className="bg-blue-900/30 p-2 rounded border border-blue-900/50 text-blue-200">🛡️ 戰略級：設鬧鐘做 (Schedule)</div>
+        </div>
+      </div>
+
+      <GameButton onClick={() => window.location.reload()} variant="secondary" className="mt-8 px-8 flex-shrink-0">
+        <RefreshCw size={20} /> NEW GAME
+      </GameButton>
+    </div>
+  );
+
+  return (
+    // Changed h-screen to h-[100dvh] to fix iPad Safari address bar issues
+    <div className="w-full h-[100dvh] bg-slate-900 text-slate-100 font-sans overflow-hidden relative selection:bg-cyan-500/30 supports-[height:100dvh]:h-[100dvh]">
+      
+      {/* Scanline Effect Overlay */}
+      <div className="pointer-events-none absolute inset-0 z-50 opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]"></div>
+
+      {/* Header / Progress - HP Bar Style */}
+      {level > 0 && level < 4 && (
+        <div className="absolute top-0 left-0 right-0 h-3 bg-slate-800 border-b border-slate-700 z-40">
+          <div 
+            className="h-full bg-gradient-to-r from-green-500 to-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.5)] transition-all duration-500 ease-out"
+            style={{ width: `${(level / 3) * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* Feedback Toast - Achievement Style */}
+      {showFeedback && (
+        <div className={`fixed top-8 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded border-l-4 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] flex items-center gap-3 animate-in slide-in-from-top-4 duration-300 backdrop-blur-md font-mono tracking-wide
+          ${showFeedback.type === 'success' ? 'bg-slate-800/90 border-green-500 text-green-400' : 'bg-slate-800/90 border-red-500 text-red-400'}`}>
+          {showFeedback.type === 'success' ? <Check size={20} /> : <AlertTriangle size={20} />}
+          <span className="font-bold">{showFeedback.message}</span>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="h-full pt-6">
+        {level === 0 && renderIntro()}
+        {level === 1 && renderLevel1()}
+        {level === 2 && renderLevel2()}
+        {level === 3 && renderLevel3()}
+        {level === 4 && renderWin()}
+      </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.5);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(6, 182, 212, 0.3);
+          border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(6, 182, 212, 0.6);
+        }
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 8s linear infinite;
+        }
+      `}</style>
+    </div>
+  );
+}
